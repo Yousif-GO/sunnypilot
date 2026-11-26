@@ -150,7 +150,7 @@ class Controls(ControlsExt):
     #   Original MAX_LATERAL_ACCEL       = 3.6 m/s^2 (ISO_LATERAL_ACCEL = 3.0 m/s^2 + road bank)
     #   Original Tesla MAX_STEER_ANGLE   = 360.0 deg (CarControllerParams.ANGLE_LIMITS)
     #   Original Tesla MAX_STEER_RATE    = 250.0 deg/s (5.0 deg per 20ms frame)
-    CONSERVATIVE_MAX_LAT_ACCEL = 1.8          # m/s^2 (original: ~3.6 m/s^2)
+    CONSERVATIVE_MAX_LAT_ACCEL = 3.6          # m/s^2 (original: ~3.6 m/s^2)
     CONSERVATIVE_MAX_STEER_ANGLE_DEG = 50.0   # deg   (original: 360.0 deg)
     CONSERVATIVE_MAX_STEER_RATE_DEG_S = 75.0  # deg/s (original: 250.0 deg/s)
 
