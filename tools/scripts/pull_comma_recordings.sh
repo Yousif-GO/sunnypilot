@@ -12,7 +12,7 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-COMMA_IP="$1"
+COMMA_TARGET="$1"
 DEST_DIR="${2:-./comma_recordings}"
 CONVERT_MP4=0
 for arg in "$@"; do
@@ -23,10 +23,18 @@ done
 
 mkdir -p "$DEST_DIR"
 
-echo "Pulling all video & telemetry from comma@${COMMA_IP}:/data/media/0/realdata/ -> ${DEST_DIR}"
+if [[ "$COMMA_TARGET" == "comma-remote" || "$COMMA_TARGET" == *"@"* ]]; then
+  REMOTE_SPEC="${COMMA_TARGET}:/data/media/0/realdata/"
+  SSH_CMD="ssh"
+else
+  REMOTE_SPEC="comma@${COMMA_TARGET}:/data/media/0/realdata/"
+  SSH_CMD="ssh -i ~/.ssh/id_ed25519"
+fi
+
+echo "Pulling all video & telemetry from ${REMOTE_SPEC} -> ${DEST_DIR}"
 rsync -avz --progress \
-  -e "ssh -i ~/.ssh/id_ed25519" \
-  "comma@${COMMA_IP}:/data/media/0/realdata/" \
+  -e "$SSH_CMD" \
+  "$REMOTE_SPEC" \
   "${DEST_DIR}/"
 
 if [[ "$CONVERT_MP4" -eq 1 ]]; then
