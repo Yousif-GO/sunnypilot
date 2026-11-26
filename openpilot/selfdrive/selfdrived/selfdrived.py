@@ -583,12 +583,12 @@ class SelfdriveD:
     alerts = self.events.create_alerts(self.state_machine.current_alert_types, callback_args)
     alerts_sp = self.events_sp.create_alerts(self.state_machine.current_alert_types, callback_args)
 
-    # custom-c4: warn driver when model lane/path confidence is low while steering
+    # custom-c4: warn driver only when model lateral path uncertainty is high while steering
+    # (does not require visible lane lines so unmarked roads work normally)
     if self.sm['carControl'].latActive and CS.vEgo > 4.0 and self.sm.alive['modelV2']:
       mv2 = self.sm['modelV2']
-      low_lanes = len(mv2.laneLineProbs) >= 3 and mv2.laneLineProbs[1] < 0.25 and mv2.laneLineProbs[2] < 0.25
       high_path_std = len(mv2.position.yStd) > 10 and mv2.position.yStd[10] > 1.2
-      if low_lanes or high_path_std:
+      if high_path_std:
         self._low_conf_frames += 1
       else:
         self._low_conf_frames = 0
