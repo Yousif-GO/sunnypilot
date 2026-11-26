@@ -12,7 +12,6 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
-from opendbc.can import CANParser
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
@@ -181,10 +180,6 @@ class Car:
     self.is_metric = self.params.get_bool("IsMetric")
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
 
-    # custom-c4: track Tesla scroll wheel press (CAN 0x311 UI_warning.scrollWheelPressed) as instant disengage
-    self._tesla_scroll_cp = CANParser('tesla_model3_party', [('UI_warning', 0)], 0) if self.CP.brand == 'tesla' else None
-    self._tesla_scroll_prev = False
-
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
@@ -196,12 +191,6 @@ class Car:
 
     # Update carState from CAN
     CS, CS_SP = self.CI.update(can_list)
-    if self._tesla_scroll_cp is not None:
-      self._tesla_scroll_cp.update(can_list)
-      scroll_pressed = bool(self._tesla_scroll_cp.vl['UI_warning']['scrollWheelPressed'])
-      if scroll_pressed and not self._tesla_scroll_prev:
-        CS.buttonEvents = [*CS.buttonEvents, structs.CarState.ButtonEvent(type=structs.CarState.ButtonEvent.Type.cancel, pressed=True)]
-      self._tesla_scroll_prev = scroll_pressed
     CS_SP = convert_to_capnp(CS_SP)
 
     # Update radar tracks from CAN
