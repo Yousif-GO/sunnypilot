@@ -52,6 +52,7 @@ class Controls(ControlsExt):
     self.steer_limited_by_safety = False
     self.curvature = 0.0
     self.desired_curvature = 0.0
+    self._prev_steer_angle_deg = 0.0
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -145,6 +146,19 @@ class Controls(ControlsExt):
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+    # custom-c4 conservative steering caps (original limits kept in comments for easy adjustment):
+    #   Original MAX_LATERAL_ACCEL       = 3.6 m/s^2 (ISO_LATERAL_ACCEL = 3.0 m/s^2 + road bank)
+    #   Original Tesla MAX_STEER_ANGLE   = 360.0 deg (CarControllerParams.ANGLE_LIMITS)
+    #   Original Tesla MAX_STEER_RATE    = 250.0 deg/s (5.0 deg per 20ms frame)
+    CONSERVATIVE_MAX_LAT_ACCEL = 1.8          # m/s^2 (original: ~3.6 m/s^2)
+    CONSERVATIVE_MAX_STEER_ANGLE_DEG = 50.0   # deg   (original: 360.0 deg)
+    CONSERVATIVE_MAX_STEER_RATE_DEG_S = 75.0  # deg/s (original: 250.0 deg/s)
+
+    if CC.latActive:
+      v_eff = max(CS.vEgo, 1.0)
+      max_curv = CONSERVATIVE_MAX_LAT_ACCEL / (v_eff ** 2)
+      new_desired_curvature = max(-max_curv, min(max_curv, new_desired_curvature))
+
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
@@ -156,7 +170,15 @@ class Controls(ControlsExt):
     if self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
       actuators.curvature = float(lateral_output)
     else:
-      actuators.steeringAngleDeg = float(lateral_output)
+      target_angle = float(lateral_output)
+      if CC.latActive:
+        max_step = CONSERVATIVE_MAX_STEER_RATE_DEG_S * DT_CTRL
+        target_angle = max(self._prev_steer_angle_deg - max_step, min(self._prev_steer_angle_deg + max_step, target_angle))
+        target_angle = max(-CONSERVATIVE_MAX_STEER_ANGLE_DEG, min(CONSERVATIVE_MAX_STEER_ANGLE_DEG, target_angle))
+        self._prev_steer_angle_deg = target_angle
+      else:
+        self._prev_steer_angle_deg = float(CS.steeringAngleDeg)
+      actuators.steeringAngleDeg = target_angle
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:
       attr = getattr(actuators, p)
