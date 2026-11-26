@@ -115,14 +115,12 @@ class Controls(ControlsExt):
     # Get which state to use for active lateral control
     _lat_active = self.get_lat_active(self.sm)
 
+    # custom-c4: pause/disengage lateral steering whenever left or right turn signal is active
     CC.latActive = _lat_active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
+                   not (CS.leftBlinker or CS.rightBlinker) and \
                    (not standstill or self.CP.steerAtStandstill)
-    # custom-c4: keep MADS lateral steering active at all speeds, but disable longitudinal below 30 km/h
-    # so the driver controls throttle/brake at low speeds.
-    MIN_LONG_SPEED_MPS = 30.0 * CV.KPH_TO_MS
-    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and \
-                    (self.CP.openpilotLongitudinalControl or not self.CP_SP.pcmCruiseSpeed) and \
-                    (CS.vEgo >= MIN_LONG_SPEED_MPS)
+    # custom-c4: lateral-only mode — disengage longitudinal control so the driver always controls throttle/brake
+    CC.longActive = False
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state

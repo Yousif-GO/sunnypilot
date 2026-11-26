@@ -72,6 +72,8 @@ def manager_init() -> None:
       }, block=True)
     params.put_bool("SshEnabled", True, block=True)
     params.put_bool("RecordFront", True, block=True)
+    params.put_bool("AlphaLongitudinalEnabled", False, block=True)
+    params.put("MadsSteeringMode", 0, block=True)  # REMAIN_ACTIVE: keep lateral active when brake is pressed
 
   # Create folders needed for msgq
   try:
