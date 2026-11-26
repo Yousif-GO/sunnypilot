@@ -58,6 +58,21 @@ def manager_init() -> None:
     if default_value is not None and params.get(k) is None:
       params.put(k, default_value, block=True)
 
+  # custom-c4 defaults: Tesla Model Y 2023 (HW3), direct SSH, local full video/telemetry recording
+  if not PC:
+    if params.get("CarPlatformBundle") is None:
+      params.put("CarPlatformBundle", {
+        "name": "Tesla Model Y (with HW3) 2020-24",
+        "platform": "TESLA_MODEL_Y",
+        "make": "Tesla",
+        "brand": "tesla",
+        "model": "Model Y (with HW3)",
+        "year": ["2020", "2021", "2022", "2023", "2024"],
+        "package": "All",
+      }, block=True)
+    params.put_bool("SshEnabled", True, block=True)
+    params.put_bool("RecordFront", True, block=True)
+
   # Create folders needed for msgq
   try:
     os.mkdir(Paths.shm_path())
