@@ -32,7 +32,6 @@ from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
-from openpilot.sunnypilot.selfdrive.selfdrived.events_base import Alert, Priority as AlertPriority
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -180,7 +179,6 @@ class SelfdriveD:
     self.car_events_sp = CarSpecificEventsSP(self.CP, self.CP_SP)
 
     self.button_state_tracker = ButtonStateTracker()
-    self._low_conf_frames = 0
 
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
@@ -582,32 +580,6 @@ class SelfdriveD:
 
     alerts = self.events.create_alerts(self.state_machine.current_alert_types, callback_args)
     alerts_sp = self.events_sp.create_alerts(self.state_machine.current_alert_types, callback_args)
-
-    # custom-c4: warn driver only when model lateral path uncertainty is high while steering
-    # (does not require visible lane lines so unmarked roads work normally)
-    if self.sm['carControl'].latActive and CS.vEgo > 4.0 and self.sm.alive['modelV2']:
-      mv2 = self.sm['modelV2']
-      high_path_std = len(mv2.position.yStd) > 10 and mv2.position.yStd[10] > 1.2
-      if high_path_std:
-        self._low_conf_frames += 1
-      else:
-        self._low_conf_frames = 0
-      if self._low_conf_frames >= int(0.5 / DT_CTRL):
-        low_conf_alert = Alert(
-          "Low Model Confidence",
-          "Watch Road — Hold Steering Wheel",
-          log.SelfdriveState.AlertStatus.userPrompt,
-          log.SelfdriveState.AlertSize.mid,
-          AlertPriority.LOW,
-          car.CarControl.HUDControl.VisualAlert.steerRequired,
-          log.SelfdriveState.AudibleAlert.prompt,
-          1.5,
-        )
-        low_conf_alert.alert_type = "modelLowConfidence/warning"
-        low_conf_alert.event_type = ET.WARNING
-        alerts.append(low_conf_alert)
-    else:
-      self._low_conf_frames = 0
 
     self.AM.add_many(self.sm.frame, alerts + alerts_sp)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
