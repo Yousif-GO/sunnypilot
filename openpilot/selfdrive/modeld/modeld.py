@@ -377,24 +377,30 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
-    # custom-c4: feed navigation turn/fork desire into drivingModel (lateral-only; driver controls longitudinal)
+    # custom-c4: feed navigation turn/fork desire into drivingModel ONLY when driver confirms with matching blinker
+    # (prevents unexpected turns if driver is not ready or skips the turn; lateral-only, driver controls longitudinal)
+    cs_now = sm["carState"]
     if (desire == log.Desire.none and sm.alive["navInstruction"] and sm.valid["navInstruction"] and
-        sm["carControl"].latActive and not (sm["carState"].leftBlinker or sm["carState"].rightBlinker)):
+        sm["carControl"].latActive and (cs_now.leftBlinker != cs_now.rightBlinker)):
       nav = sm["navInstruction"]
       dist = nav.maneuverDistance
       mtype = (nav.maneuverType or "").lower()
       mmod = (nav.maneuverModifier or "").lower()
-      v_now = max(sm["carState"].vEgo, 0.0)
+      v_now = max(cs_now.vEgo, 0.0)
       trigger_dist = 75.0 if v_now > 18.0 else 45.0
-      if 3.0 <= dist <= trigger_dist and mtype in ("turn", "end of road", "fork", "off ramp", "on ramp", "merge"):
-        if "slight left" in mmod or (mtype == "fork" and "left" in mmod):
-          desire = log.Desire.keepLeft
-        elif "slight right" in mmod or (mtype in ("fork", "off ramp") and "right" in mmod):
-          desire = log.Desire.keepRight
-        elif "left" in mmod and v_now < 15.0 and not sm["carState"].leftBlindspot:
-          desire = log.Desire.turnLeft
-        elif "right" in mmod and v_now < 15.0 and not sm["carState"].rightBlindspot:
-          desire = log.Desire.turnRight
+      left_confirmed = "left" in mmod and cs_now.leftBlinker and not cs_now.rightBlinker
+      right_confirmed = "right" in mmod and cs_now.rightBlinker and not cs_now.leftBlinker
+      if -5.0 <= dist <= trigger_dist and mtype in ("turn", "end of road", "fork", "off ramp", "on ramp", "merge"):
+        if left_confirmed:
+          if "slight left" in mmod or mtype == "fork":
+            desire = log.Desire.keepLeft
+          elif v_now < 15.0 and not cs_now.leftBlindspot:
+            desire = log.Desire.turnLeft
+        elif right_confirmed:
+          if "slight right" in mmod or mtype in ("fork", "off ramp"):
+            desire = log.Desire.keepRight
+          elif v_now < 15.0 and not cs_now.rightBlindspot:
+            desire = log.Desire.turnRight
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)

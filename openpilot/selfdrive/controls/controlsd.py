@@ -45,7 +45,7 @@ class Controls(ControlsExt):
 
     self.sm = messaging.SubMaster(['lateralDelay', 'vehicleParameters', 'lateralTorqueParameters', 'modelV2', 'selfdriveState',
                                    'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'] + self.sm_services_ext,
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'navInstruction'] + self.sm_services_ext,
                                   poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'] + self.pm_services_ext)
 
@@ -116,9 +116,23 @@ class Controls(ControlsExt):
     # Get which state to use for active lateral control
     _lat_active = self.get_lat_active(self.sm)
 
-    # custom-c4: pause/disengage lateral steering whenever left or right turn signal is active
+    # custom-c4: blinkers normally pause lateral steering for manual lane changes,
+    # EXCEPT when confirming an upcoming navigation turn/fork in the matching direction
+    nav_turn_confirmed = False
+    if self.sm.alive['navInstruction'] and self.sm.valid['navInstruction']:
+      nav = self.sm['navInstruction']
+      dist = nav.maneuverDistance
+      mtype = (nav.maneuverType or "").lower()
+      mmod = (nav.maneuverModifier or "").lower()
+      trigger_dist = 75.0 if CS.vEgo > 18.0 else 45.0
+      if -5.0 <= dist <= trigger_dist and mtype in ("turn", "end of road", "fork", "off ramp", "on ramp", "merge"):
+        nav_left = "left" in mmod and CS.leftBlinker and not CS.rightBlinker
+        nav_right = "right" in mmod and CS.rightBlinker and not CS.leftBlinker
+        nav_turn_confirmed = nav_left or nav_right
+
+    blinker_pause = (CS.leftBlinker or CS.rightBlinker) and not nav_turn_confirmed
     CC.latActive = _lat_active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
-                   not (CS.leftBlinker or CS.rightBlinker) and \
+                   not blinker_pause and \
                    (not standstill or self.CP.steerAtStandstill)
     # custom-c4: lateral-only mode — disengage longitudinal control so the driver always controls throttle/brake
     CC.longActive = False
