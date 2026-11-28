@@ -97,16 +97,57 @@ class RouteEngine:
     cloudlog.warning(f"Calculating route {self.last_position} -> {destination}")
     self.nav_destination = destination
 
+    coords_str = ';'.join(f'{lon},{lat}' for lon, lat in (self.last_position, destination))
+
+    # custom-c4: use free OSRM routing by default when no MAPBOX_TOKEN is set (no comma prime required)
+    if self.mapbox_token is None:
+      url = f"https://router.project-osrm.org/route/v1/driving/{coords_str}"
+      params = {
+        'geometries': 'geojson',
+        'overview': 'full',
+        'steps': 'true',
+        'alternatives': 'false',
+      }
+      if self.last_bearing is not None:
+        params['bearings'] = f"{(self.last_bearing + 360) % 360:.0f},90;"
+      try:
+        resp = requests.get(url, params=params, timeout=10, headers={'User-Agent': 'comma-custom-c4/1.0'})
+        resp.raise_for_status()
+        r = resp.json()
+        if r.get('routes'):
+          steps = r['routes'][0]['legs'][0]['steps']
+          # Synthesize Mapbox-compatible bannerInstructions from the next step's maneuver
+          for i, st in enumerate(steps):
+            nxt = steps[i + 1] if i + 1 < len(steps) else st
+            man = nxt.get('maneuver', {})
+            mtype = man.get('type', '')
+            mmod = man.get('modifier', '')
+            road_name = nxt.get('name') or st.get('name') or mtype.replace('_', ' ').title()
+            st['bannerInstructions'] = [{
+              'distanceAlongGeometry': max(float(st.get('distance', 0.0)), 150.0),
+              'primary': {
+                'text': road_name,
+                'type': mtype,
+                'modifier': mmod,
+              },
+            }]
+          self.route = steps
+          self.route_geometry = [np.array(step['geometry']['coordinates'], dtype=np.float64).reshape((-1, 2)) for step in self.route]
+          self.step_idx = 0
+        else:
+          cloudlog.warning("OSRM returned empty route")
+          self.clear_route()
+      except requests.exceptions.RequestException:
+        cloudlog.exception("failed to get OSRM route")
+        self.clear_route()
+      return
+
     lang = self.params.get('LanguageSetting')
     if lang is not None:
       lang = lang.replace('main_', '')
 
-    token = self.mapbox_token
-    if token is None:
-      token = self.api.get_token()
-
     params = {
-      'access_token': token,
+      'access_token': self.mapbox_token,
       'geometries': 'geojson',
       'overview': 'full',
       'steps': 'true',
@@ -117,7 +158,6 @@ class RouteEngine:
     if self.last_bearing is not None:
       params['bearings'] = f"{(self.last_bearing + 360) % 360:.0f},90;"
 
-    coords_str = ';'.join(f'{lon},{lat}' for lon, lat in (self.last_position, destination))
     url = self.mapbox_host + '/directions/v5/mapbox/driving-traffic/' + coords_str
     try:
       resp = requests.get(url, params=params, timeout=10)

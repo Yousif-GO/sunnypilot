@@ -308,7 +308,8 @@ def main(demo=False):
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"] + (["chestnutGpuState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
   sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState",
-                  "carControl", "controlsState", "lateralDelay"])
+                  "carControl", "controlsState", "lateralDelay", "navInstruction"],
+                 ignore_alive=["navInstruction"], ignore_valid=["navInstruction"])
 
   publish_state = PublishState()
   params = Params()
@@ -376,6 +377,24 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
+    # custom-c4: feed navigation turn/fork desire into drivingModel (lateral-only; driver controls longitudinal)
+    if (desire == log.Desire.none and sm.alive["navInstruction"] and sm.valid["navInstruction"] and
+        sm["carControl"].latActive and not (sm["carState"].leftBlinker or sm["carState"].rightBlinker)):
+      nav = sm["navInstruction"]
+      dist = nav.maneuverDistance
+      mtype = (nav.maneuverType or "").lower()
+      mmod = (nav.maneuverModifier or "").lower()
+      v_now = max(sm["carState"].vEgo, 0.0)
+      trigger_dist = 75.0 if v_now > 18.0 else 45.0
+      if 3.0 <= dist <= trigger_dist and mtype in ("turn", "end of road", "fork", "off ramp", "on ramp", "merge"):
+        if "slight left" in mmod or (mtype == "fork" and "left" in mmod):
+          desire = log.Desire.keepLeft
+        elif "slight right" in mmod or (mtype in ("fork", "off ramp") and "right" in mmod):
+          desire = log.Desire.keepRight
+        elif "left" in mmod and v_now < 15.0 and not sm["carState"].leftBlindspot:
+          desire = log.Desire.turnLeft
+        elif "right" in mmod and v_now < 15.0 and not sm["carState"].rightBlindspot:
+          desire = log.Desire.turnRight
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
