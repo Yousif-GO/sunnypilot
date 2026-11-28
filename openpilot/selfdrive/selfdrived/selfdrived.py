@@ -32,6 +32,8 @@ from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.events_base import Alert, Priority as AlertPriority
+from openpilot.sunnypilot.selfdrive.selfdrived.pinned_hazards import PinnedHazardMatcher
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -180,6 +182,7 @@ class SelfdriveD:
     self.car_events_sp = CarSpecificEventsSP(self.CP, self.CP_SP)
 
     self.button_state_tracker = ButtonStateTracker()
+    self.pinned_hazards = PinnedHazardMatcher()
 
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
@@ -581,6 +584,39 @@ class SelfdriveD:
 
     alerts = self.events.create_alerts(self.state_machine.current_alert_types, callback_args)
     alerts_sp = self.events_sp.create_alerts(self.state_machine.current_alert_types, callback_args)
+
+    # custom-c4 Phase 1: shadow HUD alerts for upcoming speed bumps & directional stop signs (zero braking)
+    if self.sm.alive[self.gps_location_service] and CS.vEgo > 3.0:
+      gps = self.sm[self.gps_location_service]
+      if gps.horizontalAccuracy < 20.0:
+        hmatch = self.pinned_hazards.update(gps.latitude, gps.longitude, gps.bearingDeg, CS.vEgo)
+        if hmatch is not None:
+          dist_i = int(round(hmatch.along_m))
+          if hmatch.hazard_type == "speed_bump":
+            title = "Speed Bump Ahead"
+            sub = f"{dist_i}m · Target {hmatch.target_speed_kmh} km/h"
+            sound = log.SelfdriveState.AudibleAlert.prompt if hmatch.is_new_trigger else log.SelfdriveState.AudibleAlert.none
+          elif hmatch.hazard_type == "inferred_stop":
+            title = "Inferred Stop Ahead"
+            sub = f"{dist_i}m · Check Junction"
+            sound = log.SelfdriveState.AudibleAlert.none
+          else:
+            title = "Stop Sign Ahead"
+            sub = f"{dist_i}m · Slow to Stop"
+            sound = log.SelfdriveState.AudibleAlert.prompt if hmatch.is_new_trigger else log.SelfdriveState.AudibleAlert.none
+          hazard_alert = Alert(
+            title,
+            sub,
+            log.SelfdriveState.AlertStatus.normal,
+            log.SelfdriveState.AlertSize.mid,
+            AlertPriority.LOW,
+            car.CarControl.HUDControl.VisualAlert.none,
+            sound,
+            0.5,
+          )
+          hazard_alert.alert_type = f"pinnedHazard/{hmatch.hazard_type}"
+          hazard_alert.event_type = ET.PERMANENT
+          alerts.append(hazard_alert)
 
     self.AM.add_many(self.sm.frame, alerts + alerts_sp)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
