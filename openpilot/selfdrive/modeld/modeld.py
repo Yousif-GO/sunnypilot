@@ -391,9 +391,9 @@ def main(demo=False):
       mtype = (nav.maneuverType or "").lower()
       mmod = (nav.maneuverModifier or "").lower()
       v_now = max(cs_now.vEgo, 0.0)
-      trigger_dist = min(22.0, max(8.0, v_now * 2.5))
+      trigger_dist = min(18.0, max(8.0, v_now * 2.5))
       is_explicit_turn = mtype in ("turn", "end of road") and "slight" not in mmod
-      if -5.0 <= dist <= trigger_dist and is_explicit_turn and v_now < 12.0:
+      if -5.0 <= dist <= trigger_dist and is_explicit_turn and v_now < 10.0:
         if "left" in mmod and cs_now.leftBlinker and not cs_now.rightBlinker and not cs_now.leftBlindspot:
           nav_desire = log.Desire.turnLeft
         elif "right" in mmod and cs_now.rightBlinker and not cs_now.leftBlinker and not cs_now.rightBlindspot:

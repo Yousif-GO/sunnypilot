@@ -53,6 +53,7 @@ class Controls(ControlsExt):
     self.curvature = 0.0
     self.desired_curvature = 0.0
     self._prev_steer_angle_deg = 0.0
+    self._nav_turn_nudged = False
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -116,20 +117,35 @@ class Controls(ControlsExt):
     # Get which state to use for active lateral control
     _lat_active = self.get_lat_active(self.sm)
 
-    # custom-c4: blinkers normally pause lateral steering for manual lane changes,
-    # EXCEPT when confirming an explicit navigation turn (turnLeft/turnRight only; no keepLeft/keepRight)
-    nav_turn_confirmed = False
+    # custom-c4: blinkers normally pause lateral steering (letting the driver wait safely for oncoming traffic),
+    # EXCEPT when confirming an explicit navigation turn (left or right) with BOTH matching blinker AND a
+    # deliberate steering hand-nudge in the turn direction. Nudging opposite instantly aborts the turn.
+    nav_turn_eligible = False
+    nav_left = False
+    nav_right = False
     if self.sm.alive['navInstruction'] and self.sm.valid['navInstruction']:
       nav = self.sm['navInstruction']
       dist = nav.maneuverDistance
       mtype = (nav.maneuverType or "").lower()
       mmod = (nav.maneuverModifier or "").lower()
-      trigger_dist = min(22.0, max(8.0, CS.vEgo * 2.5))
+      trigger_dist = min(18.0, max(8.0, CS.vEgo * 2.5))
       is_explicit_turn = mtype in ("turn", "end of road") and "slight" not in mmod
-      if -5.0 <= dist <= trigger_dist and is_explicit_turn and CS.vEgo < 12.0:
+      if -5.0 <= dist <= trigger_dist and is_explicit_turn and CS.vEgo < 10.0:
         nav_left = "left" in mmod and CS.leftBlinker and not CS.rightBlinker
         nav_right = "right" in mmod and CS.rightBlinker and not CS.leftBlinker
-        nav_turn_confirmed = nav_left or nav_right
+        nav_turn_eligible = nav_left or nav_right
+
+    if not nav_turn_eligible or not _lat_active:
+      self._nav_turn_nudged = False
+    else:
+      nudge_match = CS.steeringPressed and ((nav_left and CS.steeringTorque > 0.3) or (nav_right and CS.steeringTorque < -0.3))
+      nudge_abort = CS.steeringPressed and ((nav_left and CS.steeringTorque < -0.3) or (nav_right and CS.steeringTorque > 0.3))
+      if nudge_abort:
+        self._nav_turn_nudged = False
+      elif nudge_match:
+        self._nav_turn_nudged = True
+
+    nav_turn_confirmed = nav_turn_eligible and self._nav_turn_nudged
 
     blinker_pause = (CS.leftBlinker or CS.rightBlinker) and not nav_turn_confirmed
     CC.latActive = _lat_active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
