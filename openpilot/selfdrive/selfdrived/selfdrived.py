@@ -45,6 +45,7 @@ PandaType = log.PandaState.PandaType
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 EventName = log.OnroadEvent.EventName
+EventNameSP = custom.OnroadEventSP.EventName
 ButtonType = car.CarState.ButtonEvent.Type
 SafetyModel = car.CarParams.SafetyModel
 AlertLevel = log.DriverMonitoringState.AlertLevel
@@ -643,6 +644,14 @@ class SelfdriveD:
   def step(self):
     CS = self.data_sample()
     self.update_events(CS)
+    # custom-c4: 2-stage Tesla D-stalk engage:
+    # 1st pull down (when MADS is off) -> enable MADS lateral-only (lkasEnable) and suppress pcmEnable
+    # so controlsd silently cancels stock TACC (ACC_CANCEL_GENERIC_SILENT).
+    # 2nd pull down (when MADS is already on) -> allow pcmEnable so stock TACC engages at current speed.
+    if (self.CP.brand == "tesla" and self.mads.enabled_toggle and not self.mads.enabled and
+        self.events.has(EventName.pcmEnable) and not self.events.contains(ET.NO_ENTRY)):
+      self.events.remove(EventName.pcmEnable)
+      self.events_sp.add(EventNameSP.lkasEnable)
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
     if not self.CP.notCar:

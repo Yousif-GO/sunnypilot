@@ -56,6 +56,8 @@ class ModularAssistiveDrivingSystem:
     self.main_enabled_toggle = self.params.get_bool("MadsMainCruiseAllowed")
     self.steering_mode_on_brake = read_steering_mode_param(self.CP, self.CP_SP, self.params)
     self.unified_engagement_mode = self.params.get_bool("MadsUnifiedEngagementMode")
+    # custom-c4: track when the current brake press was used to cancel cruise (so only a subsequent brake disengages MADS)
+    self._brake_canceled_cruise = False
 
   def read_params(self):
     self.main_enabled_toggle = self.params.get_bool("MadsMainCruiseAllowed")
@@ -194,6 +196,21 @@ class ModularAssistiveDrivingSystem:
           if self.events_sp.contains(EventNameSP.lkasEnable):
             self.events_sp.remove(EventNameSP.lkasEnable)
             self.events_sp.add(EventNameSP.pedalPressedAlertOnly)
+
+    # custom-c4: 2-stage brake disengage (Tesla REMAIN_ACTIVE mode):
+    # - Brake while cruise is active -> cruise cancels, MADS stays active (_brake_canceled_cruise latched until brake release)
+    # - Brake while cruise is already off -> disengage MADS completely (lkasDisable)
+    if self.CP.brand == "tesla" and self.steering_mode_on_brake == MadsSteeringModeOnBrake.REMAIN_ACTIVE:
+      cruise_was_active = (self.selfdrive.enabled or self.selfdrive.enabled_prev or
+                           CS.cruiseState.enabled or self.selfdrive.CS_prev.cruiseState.enabled)
+      brake_rising = CS.brakePressed and not self.selfdrive.CS_prev.brakePressed
+      if not CS.brakePressed:
+        self._brake_canceled_cruise = False
+      elif brake_rising:
+        if cruise_was_active:
+          self._brake_canceled_cruise = True
+        elif self.enabled and not self._brake_canceled_cruise:
+          self.events_sp.add(EventNameSP.lkasDisable)
 
     if self.should_silent_lkas_enable(CS):
       if self.state_machine.state == State.paused:
