@@ -155,7 +155,7 @@ class Controls(ControlsExt):
     CONSERVATIVE_MAX_LAT_ACCEL = 3.6          # m/s^2 (original: ~3.6 m/s^2)
     CONSERVATIVE_MAX_STEER_RATE_DEG_S = 75.0  # deg/s (original: 250.0 deg/s)
     STEER_ANGLE_CAP_BP_KPH = (0.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 120.0, 140.0)
-    STEER_ANGLE_CAP_V_DEG  = (50.0, 50.0, 40.0, 28.0, 20.0, 14.0, 10.0,   7.0,   5.5)
+    STEER_ANGLE_CAP_V_DEG  = (360.0, 360.0, 40.0, 28.0, 20.0, 14.0, 10.0,   7.0,   5.5)  # 0-30 km/h: default full (prev 50.0)
 
     def _max_steer_angle_for_speed(v_kph: float) -> float:
       if v_kph <= STEER_ANGLE_CAP_BP_KPH[0]:
