@@ -117,15 +117,16 @@ class Controls(ControlsExt):
     _lat_active = self.get_lat_active(self.sm)
 
     # custom-c4: blinkers normally pause lateral steering for manual lane changes,
-    # EXCEPT when confirming an upcoming navigation turn/fork in the matching direction
+    # EXCEPT when confirming an explicit navigation turn (turnLeft/turnRight only; no keepLeft/keepRight)
     nav_turn_confirmed = False
     if self.sm.alive['navInstruction'] and self.sm.valid['navInstruction']:
       nav = self.sm['navInstruction']
       dist = nav.maneuverDistance
       mtype = (nav.maneuverType or "").lower()
       mmod = (nav.maneuverModifier or "").lower()
-      trigger_dist = 75.0 if CS.vEgo > 18.0 else 45.0
-      if -5.0 <= dist <= trigger_dist and mtype in ("turn", "end of road", "fork", "off ramp", "on ramp", "merge"):
+      trigger_dist = min(22.0, max(8.0, CS.vEgo * 2.5))
+      is_explicit_turn = mtype in ("turn", "end of road") and "slight" not in mmod
+      if -5.0 <= dist <= trigger_dist and is_explicit_turn and CS.vEgo < 12.0:
         nav_left = "left" in mmod and CS.leftBlinker and not CS.rightBlinker
         nav_right = "right" in mmod and CS.rightBlinker and not CS.leftBlinker
         nav_turn_confirmed = nav_left or nav_right
@@ -167,19 +168,22 @@ class Controls(ControlsExt):
     # Speed-dependent steering angle cap derived from AASHTO Green Book min highway curve radii (e_max=6%)
     # for Tesla Model Y (L=2.89m, steerRatio=12.0) with ~25-40% lane-correction headroom:
     CONSERVATIVE_MAX_LAT_ACCEL = 3.6          # m/s^2 (original: ~3.6 m/s^2)
-    CONSERVATIVE_MAX_STEER_RATE_DEG_S = 75.0  # deg/s (original: 250.0 deg/s)
+    # Speed-dependent steer rate cap: faster at low city speeds so 90 deg turns don't overshoot,
+    # conservative 75 deg/s at >= 40 km/h (original flat Tesla limit: 250.0 deg/s)
+    STEER_RATE_CAP_BP_KPH  = (0.0, 20.0, 30.0, 40.0)
+    STEER_RATE_CAP_V_DEG_S = (200.0, 200.0, 120.0, 75.0)
     STEER_ANGLE_CAP_BP_KPH = (0.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 120.0, 140.0)
     STEER_ANGLE_CAP_V_DEG  = (360.0, 360.0, 40.0, 28.0, 20.0, 14.0, 10.0,   7.0,   5.5)  # 0-30 km/h: default full (prev 50.0)
 
-    def _max_steer_angle_for_speed(v_kph: float) -> float:
-      if v_kph <= STEER_ANGLE_CAP_BP_KPH[0]:
-        return STEER_ANGLE_CAP_V_DEG[0]
-      for i in range(len(STEER_ANGLE_CAP_BP_KPH) - 1):
-        x0, x1 = STEER_ANGLE_CAP_BP_KPH[i], STEER_ANGLE_CAP_BP_KPH[i + 1]
+    def _interp_cap(v_kph: float, bp: tuple[float, ...], vals: tuple[float, ...]) -> float:
+      if v_kph <= bp[0]:
+        return vals[0]
+      for i in range(len(bp) - 1):
+        x0, x1 = bp[i], bp[i + 1]
         if v_kph <= x1:
           t = (v_kph - x0) / (x1 - x0)
-          return STEER_ANGLE_CAP_V_DEG[i] + t * (STEER_ANGLE_CAP_V_DEG[i + 1] - STEER_ANGLE_CAP_V_DEG[i])
-      return STEER_ANGLE_CAP_V_DEG[-1]
+          return vals[i] + t * (vals[i + 1] - vals[i])
+      return vals[-1]
 
     if CC.latActive:
       v_eff = max(CS.vEgo, 1.0)
@@ -199,8 +203,9 @@ class Controls(ControlsExt):
     else:
       target_angle = float(lateral_output)
       if CC.latActive:
-        max_step = CONSERVATIVE_MAX_STEER_RATE_DEG_S * DT_CTRL
-        max_angle = _max_steer_angle_for_speed(CS.vEgo * CV.MS_TO_KPH)
+        v_kph = CS.vEgo * CV.MS_TO_KPH
+        max_step = _interp_cap(v_kph, STEER_RATE_CAP_BP_KPH, STEER_RATE_CAP_V_DEG_S) * DT_CTRL
+        max_angle = _interp_cap(v_kph, STEER_ANGLE_CAP_BP_KPH, STEER_ANGLE_CAP_V_DEG)
         target_angle = max(self._prev_steer_angle_deg - max_step, min(self._prev_steer_angle_deg + max_step, target_angle))
         target_angle = max(-max_angle, min(max_angle, target_angle))
         self._prev_steer_angle_deg = target_angle

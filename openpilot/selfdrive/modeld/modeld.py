@@ -341,6 +341,8 @@ def main(demo=False):
 
   DH = DesireHelper()
   RELC = RoadEdgeLaneChangeController()
+  last_desire_state = None
+  nav_repulse_frames = 0
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -377,9 +379,11 @@ def main(demo=False):
 
     sm.update(0)
     desire = DH.desire
-    # custom-c4: feed navigation turn/fork desire into drivingModel ONLY when driver confirms with matching blinker
-    # (prevents unexpected turns if driver is not ready or skips the turn; lateral-only, driver controls longitudinal)
+    # custom-c4: feed explicit turnLeft/turnRight desire ONLY when driver confirms with matching blinker
+    # (never uses keepLeft/keepRight; time-based trigger distance prevents firing too early when crawling;
+    # re-pulses if model's 5s desire memory expires mid-turn)
     cs_now = sm["carState"]
+    nav_desire = log.Desire.none
     if (desire == log.Desire.none and sm.alive["navInstruction"] and sm.valid["navInstruction"] and
         sm["carControl"].latActive and (cs_now.leftBlinker != cs_now.rightBlinker)):
       nav = sm["navInstruction"]
@@ -387,20 +391,25 @@ def main(demo=False):
       mtype = (nav.maneuverType or "").lower()
       mmod = (nav.maneuverModifier or "").lower()
       v_now = max(cs_now.vEgo, 0.0)
-      trigger_dist = 75.0 if v_now > 18.0 else 45.0
-      left_confirmed = "left" in mmod and cs_now.leftBlinker and not cs_now.rightBlinker
-      right_confirmed = "right" in mmod and cs_now.rightBlinker and not cs_now.leftBlinker
-      if -5.0 <= dist <= trigger_dist and mtype in ("turn", "end of road", "fork", "off ramp", "on ramp", "merge"):
-        if left_confirmed:
-          if "slight left" in mmod or mtype == "fork":
-            desire = log.Desire.keepLeft
-          elif v_now < 15.0 and not cs_now.leftBlindspot:
-            desire = log.Desire.turnLeft
-        elif right_confirmed:
-          if "slight right" in mmod or mtype in ("fork", "off ramp"):
-            desire = log.Desire.keepRight
-          elif v_now < 15.0 and not cs_now.rightBlindspot:
-            desire = log.Desire.turnRight
+      trigger_dist = min(22.0, max(8.0, v_now * 2.5))
+      is_explicit_turn = mtype in ("turn", "end of road") and "slight" not in mmod
+      if -5.0 <= dist <= trigger_dist and is_explicit_turn and v_now < 12.0:
+        if "left" in mmod and cs_now.leftBlinker and not cs_now.rightBlinker and not cs_now.leftBlindspot:
+          nav_desire = log.Desire.turnLeft
+        elif "right" in mmod and cs_now.rightBlinker and not cs_now.leftBlinker and not cs_now.rightBlindspot:
+          nav_desire = log.Desire.turnRight
+    if nav_desire != log.Desire.none:
+      desire = nav_desire
+      # Re-pulse if model's internal desireState expired while still approaching/in the turn
+      if last_desire_state is not None and nav_desire < len(last_desire_state) and last_desire_state[nav_desire] < 0.35:
+        nav_repulse_frames += 1
+        if nav_repulse_frames >= 20:  # ~1.0s cooldown between re-pulses
+          model.prev_desire[:] = 0
+          nav_repulse_frames = 0
+      else:
+        nav_repulse_frames = 0
+    else:
+      nav_repulse_frames = 0
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
@@ -481,6 +490,7 @@ def main(demo=False):
       modelv2_send.modelV2.big = model.chestnut
 
       desire_state = modelv2_send.modelV2.meta.desireState
+      last_desire_state = desire_state
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
